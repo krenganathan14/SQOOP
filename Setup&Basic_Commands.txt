@@ -1,0 +1,288 @@
+/*
+
+AIM 	   :Installing Sqoop 1.4.6 on Hadoop 2.7.1 / RHEL and Sqoop basic Commands
+DATE	   :10-JAN-2018
+PreRequest :sqoop-1.4.6/ RHEL Operation system and MYSQL
+
+*/
+
+----------------------------------------------------------------------------------------------------
+Database         |  JAR file                            |  JDBC Driver Provider    
+----------------------------------------------------------------------------------------------------
+MySQL            | mysql-connector-java.jar             | Oracle Corporation
+SQL Server       | sqljdbc41.jar, sqljdbc42.jar			| Microsoft Corporation
+Oracle           | ojdbc6.jar, ojdbc7.jar, ojdbc8.jar   | Oracle Corporation
+DB2				 | db2jcc.jar,db2jcc4.jar               | IBM
+PostgreSQL       | postgresql.jar                       | The PostgreSQL Global Development Group
+Apache Derby     | derby.jar, derbyclient.jar           | Apache Software Foundation
+SQLite           | sqlite-jdbc.jar                      | Xerial.org
+Microsoft Access | ucanaccess.jar                       | UCanAccess.com
+----------------------------------------------------------------------------------------------------
+
+Step 1: Installing Sqoop
+        Unter the sqoop 1.4.6 tar package and move to the common directory and give the respective permissions.
+	
+		cd ~/install
+		tar xvzf sqoop-1.4.6.bin__hadoop-2.0.4-alpha.tar.gz    //extract(the 'x' letter) be verbose(the 'v' letter) gunzip(the 'z' letter) from file (the 'f' letter, and the file name follows).
+		sudo mv sqoop-1.4.6.bin__hadoop-2.0.4-alpha /usr/local/sqoop
+		
+		
+Step 2: Configuring Sqoop 
+		To configure Sqoop with Hadoop, you need to edit the sqoop-env.sh file, which is placed in the $SQOOP_HOME/conf directory. 
+        First of all, Redirect to Sqoop config directory and copy the template file using the following command:
+		
+		cd $SQOOP_HOME/conf
+		mv sqoop-env-template.sh sqoop-env.sh
+		echo 'export HADOOP_COMMON_HOME=/usr/local/hadoop' >> $SQOOP_HOME/conf/sqoop-env.sh
+		echo 'export HADOOP_MAPRED_HOME=/usr/local/hadoop' >> $SQOOP_HOME/conf/sqoop-env.sh
+		
+Step 3: Copy mysql-connector-java  // ITs important point as well as interview question.(Note-See above table for ref all JAR files for corresponding Database). 
+        Which database we are using that JAR file need to copy to /usr/local/sqoop
+		we are using MySQL,Hence copy mysql-connector-java.jar to /usr/local/sqoop 
+
+	    cp -p ~/install/mysql-connector-java.jar /usr/local/sqoop/
+		
+Step 4: Verifying Sqoop
+		The following command is used to verify the Sqoop version.
+
+		sqoop-version
+		
+
+		MYSQL (Preparation of Source) : open new terminal >
+
+
+	Start the MYSQL Service :
+	
+		sudo service mysqld start
+		mysql -u root -p
+		Password: root
+     mysql>
+
+	 Select the custdb database:
+	 create database custdb;
+	 use custdb;
+		CREATE TABLE customer (custid INT,firstname VARCHAR(20),lastname VARCHAR(20),city varchar(50),age int,createdt date,transactamt int );
+		insert into customer values(1,'Reyaansh','Renga','chennai',33,'2017-09-20',100000);
+		insert into customer values(2,'srini','vasan','chennai',33,'2017-09-21',10000);
+		insert into customer values(3,'vasu','devan','banglore',39,'2017-09-23',90000);
+		insert into customer values(4,'mohamed','imran','hyderabad',33,'2017-09-24',1000);
+		insert into customer values(5,'arun','basker','chennai',23,'2017-09-20',200000);
+		insert into customer values(6,'ramesh','babu','manglore',39,'2017-09-21',100000);
+		create table customer_bkp as select * from customer;
+		create table customer_bkp1 as select * from customer;
+		select * from customer;
+
+------------------------------------------------------------------------------------------------------------------------
+SQOOP WORKOUTS (Open a separate linux terminal)
+------------------------------------------------------------------------------------------------------------------------
+1.To List Databases which are in MySql
+	sqoop list-databases --connect jdbc:mysql://localhost --username root --password root;
+	sqoop list-databases --connect jdbc:mysql://127.0.0.1 --username root --password root;
+
+	
+2.To List Tables from custdb database
+	sqoop list-tables --connect jdbc:mysql://localhost/custdb --username root --password root;
+	
+3.Import Table from SQL to HDFS with 1 mapper:
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 1 --delete-target-dir ;
+	
+4. sqoop import
+
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 2 --delete-target-dir ;
+	
+		 //while use mapper 2 then below error will throgh its required some addtional parametter as below,
+		 ERROR tool.ImportTool: Error during import: No primary key could be found for table customer. Please specify one with --split-by or perform a sequential import with '-m 1'.
+		 
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 2 --delete-target-dir --split-by custid ;
+	
+	
+	//Use --direct
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root -P -table customer -m 3 --split-by custid --target-dir sqoop_import --delete-target-dir --direct;
+	
+	//--append --fetch-size 
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 3 \
+    --split-by city --append --fetch-size 100;
+	
+	//Fields terminated by & Lines terminated by
+    sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 1 --target-dir imp_del --fields-terminated-by '~' --lines-terminated-by '\n' --delete-target-dir;
+	
+	//Controlling Import:
+	//Using Where condition:
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root --table customer -m 1 --where "city ='banglore' or age>33" --target-dir filtered --delete-target-dir;
+	
+	Using free form query:
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root --query " select custid,age,transactamt from customer where (city ='banglore' or age>33) and \$CONDITIONS " --target-dir filtered --delete-target-dir -m 2 --split-by custid;
+
+
+	sqoop import 
+	--connect jdbc:mysql://localhost/custdb --username root --password root 
+	-table customer
+	-m 3 
+	--split-by custid
+	--target-dir imp_del  //DB to HDFS
+	--delete-target-dir
+	--direct
+	
+	--append 
+	--fetch-size 100
+	--fields-terminated-by '~'
+	--lines-terminated-by '\n'
+	--where "city ='banglore' or age>33"
+	--query " select custid,age,transactamt from customer where (city ='banglore' or age>33) and \$CONDITIONS "
+-----------------------------------------------------------------------------------------------------------------------------
+
+Incremental import:
+		//Execute the below insert in mysql
+		insert into customer values(7,'inceptez','tech','Chennai',3,'2017-09-28',10000);
+		
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 1 --target-dir incrimport --incremental append --check-column custid --last-value 6;
+		
+	//error if 7 value not insert no record means
+	20/07/13 00:39:49 INFO tool.ImportTool: Maximal id query for free form incremental import: SELECT MAX(`custid`) FROM `customer`
+	20/07/13 00:39:49 INFO tool.ImportTool: Incremental import based on column `custid`
+	20/07/13 00:39:49 INFO tool.ImportTool: No new rows detected since last import.	
+	
+	success o/p-
+		import, supply the following arguments:
+		20/07/13 00:42:03 INFO tool.ImportTool:  --incremental append
+		20/07/13 00:42:03 INFO tool.ImportTool:   --check-column custid
+		20/07/13 00:42:03 INFO tool.ImportTool:   --last-value 7
+		20/07/13 00:42:03 INFO tool.ImportTool: (Consider saving this with 'sqoop job --create')
+
+		
+	//Whether the below import works?
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 1 --target-dir incrimport --incremental append --check-column city --last-value 'pune'	
+		
+	O/p - error
+	
+		20/07/13 00:43:59 INFO tool.ImportTool: Maximal id query for free form incremental import: SELECT MAX(`city`) FROM `customer`
+		20/07/13 00:43:59 ERROR tool.ImportTool: Error during import: Character column (city) can not be used to determine which rows to incrementally import.
+
+--------------------------------------------------------------------------------------------------------------------------------
+Working with Saved Jobs:
+
+	sqoop job --create myjob1 -- import --connect jdbc:mysql://localhost/custdb --username root --password root --table customer --target-dir savedjob --delete-target-dir -m 1
+
+	list saved jobs:
+	sqoop job -list
+
+	sqoop job --exec myjob1
+	password:root
+
+--incremental append
+
+	Incremental Saved Jobs:
+
+	sqoop job --create myjob2 -- import --connect jdbc:mysql://localhost/custdb --username root --password root --table customer --target-dir savedjob1 --m 1 --incremental append --check-column custid --last-value 0
+	sqoop job --exec myjob2
+	Passwod : root
+
+	Insert the below row into mysql:
+	insert into customer values (8,'Iz','tech','pune',4,'2017-09-28',10000);
+
+	Execute once again the same job, now only newly added custid 8 will be imported:
+	sqoop job --exec myjob2
+	sqoop job --delete myjob2	
+	
+	Update the job:
+	sqoop job --create myjob2 -- import --connect jdbc:mysql://localhost/custdb --username root --password root --table customer --target-dir savedjob1 --m 1 --incremental append --check-column custid --last-value 6
+		
+--incremental lastmodified	
+
+	Incremental Saved Jobs:
+	
+	//got to mysql create new teble with insupdts as data type timestamp
+	mysql> create table customerlm as select * from customer;
+	mysql> alter table cutomerlm add insupdts timestamp;
+	mysql> update cutomerlm set insupdts=now();
+	
+    //	
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root --table customerlm --target-dir incrimport2 --m 1 --incremental lastmodified --check-column insupdts --last-value '2020-08-17 00:00:01'
+
+	INFO tool.ImportTool:   --last-value 2020-08-17 18:38:32.0
+
+	//got to Mysql tow below two update and insert on table customerlm
+    update customerlm set city='London', insupdts=now() where custid=1;
+    insert into customerlm values(10,'Udaya','Rekha','Thanjavur',32,'2020-08-18',10000,now() );	
+	
+    //Again run below 
+	
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root --table customerlm --target-dir incrimport2 --m 1 --incremental lastmodified --check-column insupdts --last-value '2020-08-17 18:38:32'
+	
+	ERROR:
+    20/08/18 13:11:00 ERROR tool.ImportTool: Error during import: --merge-key or --append is required when using --incremental lastmodified and the output directory exists.
+	
+	//We should use --append for update/inserted new reords with append exiting data.
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root --table customerlm --target-dir incrimport2 --m 1 --incremental lastmodified --check-column insupdts --last-value '2020-08-17 18:38:32' --append
+
+
+	sqoop job --delete myjob2
+	
+	sqoop job --create myjob2 -- import --connect jdbc:mysql://localhost/custdb --username root --password root --table customer --target-dir savedjob1 --m 1 --incremental append --check-column custid --last-value 10
+    sqoop job --exec myjob2
+	
+-----------------------------------------------------------------------------------------------------------------------------------
+Export from HDFS to SQL:
+--------------------------
+	//Create table in MYSQL before running this command
+	CREATE TABLE customer_hdfs (custid INT,firstname VARCHAR(20),lastname VARCHAR(20),city varchar(50),age int,createdt date,transactamt int );
+	
+	
+	sqoop export --connect jdbc:mysql://localhost/custdb --username root --password root --table customer_hdfs --export-dir savedjob1	
+
+
+	//Which one of the below export works?
+	sqoop export --connect jdbc:mysql://localhost/custdb --username root --password root --table customer_hdfs --export-dir imp_del;
+
+	Error- Because imp_del fields-terminated-by '~' in hdfs default fields-terminated-by is , . So use below comments will work
+		
+	sqoop export 
+	--connect jdbc:mysql://localhost/custdb --username root --password root 
+	--table customer_hdfs 
+	--export-dir imp_del 
+	--fields-terminated-by '~' 
+	--lines-terminated-by '\n';
+		
+Incremental export
+------------------
+
+Update only mode:	--update-mode updateonly
+
+	delete from customer_hdfs;
+	insert into customer_hdfs select * from customer;
+	
+	vi ~/part-m-00000
+	7~inceptez~tech~Chennai~3~2017-09-28~10000
+	8~iz~tech~Calcutta~5~2015-09-28~10000
+	9~a~srini~chennai~38~2016-08-08~13000
+	
+	Note: Delete the last blank line in the above file
+	
+	hadoop fs -put -f part-m-00000 imp_del/
+	sqoop export 
+	--connect jdbc:mysql://localhost/custdb --username root --password root 
+	--table customer_hdfs 
+	--export-dir imp_del 
+	--fields-terminated-by '~' 
+	--lines-terminated-by '\n' 
+	--update-key custid 
+	--update-mode updateonly;
+	
+	select * from customer_hdfs ORDER BY 1;
+		
+Allow insert mode:   --update-mode allowinsert
+
+	ALTER TABLE customer_hdfs ADD PRIMARY KEY (custid);
+	
+	vi ~/part-m-00000
+	8~iz~tech~Mumbai~33~2017-09-28~10000
+	10~inceptez~technologies~chennai~33~2017-09-28~13000
+	
+	Note: Delete the last blank line in the above file
+	
+	hadoop fs -put -f part-m-00000 imp_del/
+	sqoop export 
+	--connect jdbc:mysql://localhost/custdb 
+	--username root --password root --table customer_hdfs --export-dir imp_del --fields-terminated-by '~' --lines-terminated-by '\n' --update-key custid --update-mode allowinsert;		
+
+------------------------------------------------------------------------------------------------------------------

@@ -1,0 +1,316 @@
+/*
+
+AIM 	   :Sqoop Additional commands and Use Cases and SQOOP Best Practices, Performance tuning
+DATE	   :10-JAN-2018
+PreRequest :sqoop-1.4.6/ RHEL Operation system and MYSQL.
+
+*/
+
+-----------------------------------------------------------------------------------------------------------------------------------
+Sqoop Additional commands and Use Cases
+-----------------------------------------------------------------------------------------------------------------------------------
+Common Usecase 1:
+	Import All tables from a DB :
+
+	sqoop import-all-tables 
+	--connect jdbc:mysql://localhost/custdb 
+	--username root 
+	--password root 
+	--warehouse-dir '/user/hduser/sqoop/testtables' 
+	-m 1
+	
+	Import All tables other than excluded tables from a DB :
+    sqoop import-all-tables 
+	--connect jdbc:mysql://localhost/custdb 
+	--username root --password root 
+	--warehouse-dir '/user/hduser/sqoop/testtables' 
+	--exclude-tables customer_bkp1 -m 1
+	
+	Sqoop evaluation:
+	
+    sqoop eval --connect jdbc:mysql://localhost/custdb --username root --password root --query "select * from customer "
+	
+	Batch export:
+	
+    sqoop export 
+	-Dsqoop.export.statements.per.transaction=10 
+	--connect jdbc:mysql://localhost/custdb --username root --password root 
+	--table customer1 
+	--export-dir savedjob1 
+	--batch
+	
+Common Usecase 2 :
+
+	Create the below Tables MYSQL for Import:
+	use custdb;
+	CREATE TABLE customers (custid INT,firstname VARCHAR(20),lastname VARCHAR(20),city varchar(50),age int,createdt date );
+	CREATE TABLE customer_details (custid INT,firstname VARCHAR(20),fulladdress VARCHAR(200),category varchar(50),transactiondt date,transactamt int,createdt date);
+	ALTER TABLE customers ADD PRIMARY KEY(custid);
+	insert into customers values(1,'karthik','vijay','chennai',5,'2018-02-01');
+	insert into customers values(2,'arun','kumar','chennai',25,'2018-01-30');
+	insert into customers values(3,'vishwa','ajit','hyderabad',null,'2018-02-03');
+	insert into customers values(4,'bala','palani','bangalore',30,'2018-02-02');
+	insert into customer_details values(1,'karthik','3/2, jeyaram street, chrompet,Chennai','household','2018-02-01',4000,'2018-02-01');
+	insert into customer_details values(1,'karthik','3/2, jeyaram street, chrompet,Chennai 44','Automobile','2018-02-02',6000,'2018-02-02');
+	insert into customer_details values(1,'karthik','3/2, jeyaram street, chrompet,Chennai 44','Foods','2018-02-02',3000,'2018-02-02');
+	insert into customer_details values(1,'karthik','3/2, jeyaram street, chrompet,Chennai 44',null,'2018-02-02',1000,'2018-02-03');
+	insert into customer_details values(2,'arun','11, palayam blvd, broadway,Chennai 01','tools','2018-02-02',11000,'2018-02-03');
+	insert into customer_details values(2,'arun','11, palayam blvd, broadway,Chennai 01','electronics','2018-02-02',15000,'2018-02-04');
+	insert into customer_details values(3,'vishwa','1A, Elango nagar, Vadapalani,Chennai 33','clothes','2018-02-02',15000,'2018-02-04');
+	Select a.custid master_custid,a.firstname,b.custid detail_custid,a.createdt,a.age,category,transactamt
+	from customers a join customer_details b
+	on a.custid=b.custid;
+	Tables for Export:
+	CREATE TABLE customer_stage (custid INT,fullname VARCHAR(40), city varchar(50),age int,createdt date );
+	CREATE TABLE customer_exp (custid INT,fullname VARCHAR(40),city varchar(50),age int,createdt date );
+	ALTER TABLE customer_exp ADD PRIMARY KEY(custid);
+
+	Import Approach:
+	1. Import all columns of customer and customer_details data by joining custid between the 2 tables. customer_details can have columns as given.
+	2. Both custid should be named as master_custid and detail_custid from customer and customer_details respectively.
+	3. Use column boundary queries using customer.custid column, split using custid
+	4. Insert null values in category column and age columns import as NA and age a 0 respectively in the hdfs.
+	5. Store the output in cust_details hdfs directory.
+	6. Compress the imported data.
+	7. Use direct mode to transfer the entire content.
+	8. Define number of mappers as 3.
+	9. Use fetch size 100.
+	10. Once the sqoop is executed view the content in hdfs using the command:
+	hadoop fs -text cust_details/part-m-0000*.gz
+	
+	Import Solution Command:
+	
+    sqoop import 
+	--connect jdbc:mysql://localhost/custdb --username root -P --boundary-query "select min(custid), max(custid) from customers" 
+	--query 'Select a.custid master_custid,a.firstname,a.age,a.city,b.custid detail_custid,a.createdt,b.fulladdress,category,transactiondt,transactamt from customers a join customer_details b on a.custid=b.custid WHERE $CONDITIONS' 
+	--split-by a.custid --target-dir cust_details --null-non-string '0' --null-string 'NA' -z --direct --num-mappers 3 --fetch-size 100 --delete-target-dir;
+
+
+	Export Approach:
+	
+	1. Import only the subset of columns from the customer table to the HDFS (custid, concatenation of firstname and lastname,age).
+	2. Export only subset of the above imported columns to the customer_exp table specifying only these 3 columns.
+	3. Use batch mode for fast export with the sqoop.export.records.per.statement=5.
+	4. Use staging table to provide consistent load with the clear staging table option to clean the table before each load.
+	
+	Import Solution Command:
+	sqoop import 
+	--connect jdbc:mysql://localhost/custdb --username root --password root 
+	--query " select custid,concat(firstname,' ',lastname),age from customers where \$CONDITIONS " 
+	--target-dir cust_exp 
+	--delete-target-dir 
+	-m 1;
+	
+	Export Solution Command:
+	sqoop export 
+	-Dsqoop.export.records.per.statement=5 
+	--connect jdbc:mysql://localhost/custdb 
+	--username root --password root 
+	--table customer_exp 
+	--export-dir cust_exp 
+	--batch 
+	--staging-table 
+	customer_stage 
+	--clear-staging-table 
+	--columns custid,fullname,age
+
+Common Usecase 3 : Exporting multiple tables using stored procedure
+	1) Create file and type data into it
+		vi empinfo
+		101,raja,dept1,Accounts
+		102,vinay,dept2,Finanace
+		103,karthik,dept3,IT
+		104,bala,dept4,Marketing
+		Note: Delete the last blank line in the above file
+		
+	2) Create folder and copy file into hadoop
+		hadoop fs -mkdir -p /user/sqoop/spexport
+		hadoop fs -copyFromLocal -f empinfo /user/sqoop/spexport
+		
+	3) In MySQL create tables and stored procedure
+		mysql -u root -p
+		password: root
+		use custdb;
+		create table empinfo(empid int, empname varchar(20));
+		create table deptinfo(deptid varchar(10),deptname varchar(20));
+		delimiter //
+		create procedure sp_insert_empdeptinfo (IN pid int, IN pname varchar(20), IN pdeptid varchar(10), IN
+		pdeptname varchar(20))
+		BEGIN
+		INSERT INTO empinfo(empid, empname) VALUES(pid, pname);
+		INSERT INTO deptinfo(deptid,deptname) values(pdeptid, pdeptname);
+		END //
+		delimiter ;
+		
+	4) Export the data from the file to the mysql stored procedure to load data into two tables using SQOOP
+		sqoop export --connect jdbc:mysql://localhost/custdb --username root --password root --call sp_insert_empdeptinfo --export-dir /user/sqoop/spexport -m 1
+	
+	5) In mysql,select both the table empinfo and deptinfo to see the records
+		select * from empinfo;
+		select * from deptinfo;
+
+-----------------------------------------------------------------------------------------------------------------------------------
+SQOOP Best Practices and Performance tuning
+-----------------------------------------------------------------------------------------------------------------------------------
+
+Import:
+	1. Definate number of mappers: - m
+	a. More mappers can lead to faster jobs, but only up to a saturation point. This varies per table, job parameters, time of day and server availability.
+	b. Too many mappers will increase the number of parallel sessions on the database, hence affect source DB performance affecting the regular workload of the DB.
+	
+	2. Use Direct mode for all available DBs.
+	a. Rather than using the JDBC interface for transferring data, the direct mode delegates the job of transferring data to the native utilities provided by the database vendor. 
+	   For Eg. In the case of MySQL, the mysqldump and mysqlimport will be used for retrieving data from the database server or moving data back.
+	b. Binary format don’t work in direct mode.
+	
+	3. Splitting Data --split-by: Boundary Queries --boundary-query
+	a. By default, the primary key is used. Prior to starting the transfer, Sqoop will retrieve the min/max values for this column. Changed column with the --split-by parameter
+	b. Boundary Queries - What if your split-by column is skewed, table is not indexed or can be retrieved from another table?
+	If --split-by is not giving you the optimal performance you can use this to improve the performance further to Use
+	a boundary query to create the splits using the option --boundary-query
+	Eg.
+	sqoop import --connect jdbc:mysql://localhost/custdb --username root -P \
+	--boundary-query "select min(custid), max(custid) from customers"
+	--query 'Select a.custid master_custid,a.firstname,a.age,a.city,b.custid detail_custid,a.createdt,b.fulladdress,category,transactiondt,transactamt
+	from customers a join customer_details b
+	on a.custid=b.custid
+	WHERE $CONDITIONS'
+	--split-by a.custid
+	Select min(temp.id) , max(temp.id) from (Select a.custid master_custid,a.firstname,a.age,a.city,b.custid detail_custid,a.createdt,b.fulladdress,category,transactiondt,transactamt
+	from customers a join customer_details b
+	on a.custid=b.custid) as temp
+	-- boundary-query
+	--boundary-query "select min(custid), max(custid) from customers"
+	$CONDITIONS
+	For Eg. Above query will execute parallel like this.
+	SELECT a.id, a.name, b.id, b.name FROM customers a join customer_details b on a.id = b.id where a.id BETWEEN 0 AND 10;
+	SELECT a.id, a.name, b.id, b.name FROM customers a join customer_details b on a.id = b.id where a.id BETWEEN 11 AND 20;
+	SELECT a.id, a.name, b.id, b.name FROM customers a join customer_details b on a.id = b.id where a.id BETWEEN 21 AND 30;
+	
+	4. Compression
+	Compress or z When you configure the compress or z argument, you can compress the data approximately by 60% and reduce the amount of disk space required in the target. You can configure compression when the target storage is limited.
+	
+	5. fetch-size
+	Specifies the number of entries that Sqoop can import at a time.
+	Use the following syntax: --fetch-size 100
+	Where 100 represents the number of entries that Sqoop must fetch at a time. Default is 1000.
+
+Export:
+	6. Defining mappers --num-mapper
+	a. Number of simultaneous connections that will be opened against database. Sqoop will use that many processes to export data (each process will export slice of the data). Here you have to take care about the max open connections to your RDBMS, since this can overwhelm the RDBMS easily.
+	
+	7. BATCH mode --batch
+	a. Sqoop performs export row by row if we don’t leverage batch mode option.
+	b. Enabling batch mode will export more than one row at a time as batch of rows.
+	
+	8. Specify the number of records to export -Dsqoop.export.records.per.statement=10
+	a. The above option will define how many number of rows should be used in each insert statements.
+	e.g. INSERT INTO xxx VALUES (), (), (), ...
+	
+	9. Specify the number of records per transaction - -Dsqoop.export.statements.per.transaction=10
+	The above option will define how much number of statements should be used in each transaction.
+	e.g BEGIN; INSERT, INSERT, .... COMMIT
+	
+	10. Data Consistency --staging-table
+	a. In order to provide the consistent data access for the users in end database, using a staging table, Sqoop will first export all data into this staging table instead of the main table that is present in the parameter --table. Sqoop opens a new transaction to move data from the staging table to the final destination, if and only if all parallel tasks successfully transfer data.
+
+-----------------------------------------------------------------------------------------------------------------------------------
+SQOOP INCREMENTAL USECASE
+-----------------------------------------------------------------------------------------------------------------------------------		
+Import Scenarios:
+
+1. Import all data from the source by deleting target dir (Delete and load).
+
+	sqoop import 
+	--connect jdbc:mysql://localhost/custdb --username root --password root 
+	-table customer
+	-m 3 
+	--split-by custid
+	--target-dir imp_del  //DB to HDFS
+	--delete-target-dir
+	--direct	
+
+	
+2. Import all data from the source and append to the target dir (Append with all source data, may have duplicates).
+
+	sqoop import 
+	--connect jdbc:mysql://127.0.0.1/custdb --username root -P 
+	-table customer 
+	-m 2 
+	--split-by city 
+	--append 
+	-fetch-size 100
+	
+	
+3.Import only (inserted) newly added data from the DB to HDFS and get it appended options used (check column, last value incremental append)
+  (Append only with newly added source data, No duplicates loaded in the target).
+  CDC (Change Data Capture) and SCD (Slowly Changing Dimension) concepts implemented below.
+  
+  sqoop import 
+  --connect jdbc:mysql://127.0.0.1/custdb --username root -P 
+  -table customer 
+  -m 1 
+  --target-dir incrimport 
+  --incremental append 
+  --check-column custid 
+  --last-value 11
+  
+  
+4.Import only (inserted and updated) newly added or modified data from the DB to HDFS and appended. (check column, last value, incremental lastmodified)
+  (Append only with newly added and updated source data, Duplicates/history loaded in the target- Slowly changing dimension type 2).
+  
+  4.1 Importing all data for the first time(Assume 2018-08-18 is the date from when the customer_lastmodified table is created and loaded with data)
+  
+  sqoop import 
+  --connect jdbc:mysql://127.0.0.1/custdb --username root --password root 
+  --table customer_lastmodified 
+  -m 1 
+  --target-dir incrimportlm 
+  --incremental lastmodified 
+  --check-column upddt 
+  -last-value 2018-08-18;
+  
+  sqoop import --connect jdbc:mysql://127.0.0.1/custdb --username root --password root --table customer_lastmodified -m 1 --target-dir incrimportlm2 --incremental lastmodified --check-column upddt_2 --last-value 2020-08-18
+  
+   
+   NOte - Below logs saying its completed and --last-value 2020-08-18 18:30:34.0 sqoop hold it for next time process.
+  
+	20/08/18 18:31:14 INFO mapreduce.ImportJobBase: Retrieved 13 records.
+	20/08/18 18:31:14 INFO tool.ImportTool: Incremental import complete! To run another incremental import of all data following this import, supply the following arguments:
+	20/08/18 18:31:14 INFO tool.ImportTool:  --incremental lastmodified
+	20/08/18 18:31:14 INFO tool.ImportTool:   --check-column upddt
+	20/08/18 18:31:14 INFO tool.ImportTool:   --last-value 2020-08-18 18:30:34.0
+
+	
+  4.2 lets add 1 new row and update an existing row with upddt
+  
+	Again run below import then see only two newly added& updated rows will updated on existing dir in hadoop. 
+	Note --append should need from 2nd time onwards.(append option we are using to append the data in the targer hdfs, if we use –delete-target-dir 
+		   rather than append it deletes and load, if you don’t use any option the load will fail if the target directory already exists.).
+  
+	sqoop import 
+	--connect jdbc:mysql://127.0.0.1/custdb --username root --password root 
+	--table customer_lastmodified 
+	-m 1 --target-dir incrimportlm2 
+	--incremental lastmodified 
+	--check-column upddt_2 
+	--last-value '2020-08-18 20:01:49' 
+	--append;
+	
+	sqoop import --connect jdbc:mysql://127.0.0.1/custdb --username root --password root --table customer_lastmodified -m 1 --target-dir incrimportlm2 --incremental lastmodified --check-column upddt_2 --last-value '2020-08-18 18:30:34' --append;
+
+5. Import only (inserted and updated) newly added or modified data from the DB to HDFS and get it merged in the target (insert else update).
+	(check column, last value incremental lastmodified --merge-key custid)
+	(insert else update - Slowly Changing Dimension Type 1).
+		
+	sqoop import 
+	--connect jdbc:mysql://127.0.0.1/custdb --username root --password root 
+	--table customer_lastmodified 
+	-m 1 
+	--target-dir incrimportlm2 
+	--incremental lastmodified 
+	--check-column upddt_2 
+	--last-value '2020-08-18 20:12:42' 
+	--merge-key custid;
+	
+----------------------------------------------------------------------------------------------------------------------------------------------
