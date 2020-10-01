@@ -10,9 +10,9 @@ PreRequest :sqoop-1.4.6/ RHEL Operation system and MYSQL
 Database         |  JAR file                            |  JDBC Driver Provider    
 ----------------------------------------------------------------------------------------------------
 MySQL            | mysql-connector-java.jar             | Oracle Corporation
-SQL Server       | sqljdbc41.jar, sqljdbc42.jar			| Microsoft Corporation
+SQL Server       | sqljdbc41.jar, sqljdbc42.jar		| Microsoft Corporation
 Oracle           | ojdbc6.jar, ojdbc7.jar, ojdbc8.jar   | Oracle Corporation
-DB2				 | db2jcc.jar,db2jcc4.jar               | IBM
+DB2		 | db2jcc.jar,db2jcc4.jar               | IBM
 PostgreSQL       | postgresql.jar                       | The PostgreSQL Global Development Group
 Apache Derby     | derby.jar, derbyclient.jar           | Apache Software Foundation
 SQLite           | sqlite-jdbc.jar                      | Xerial.org
@@ -133,7 +133,7 @@ SQOOP WORKOUTS (Open a separate linux terminal)
 
 Incremental import:
 		//Execute the below insert in mysql
-		insert into customer values(7,'inceptez','tech','Chennai',3,'2017-09-28',10000);
+		insert into customer values(7,'internal','tech','Chennai',3,'2017-09-28',10000);
 		
 	sqoop import --connect jdbc:mysql://localhost/custdb --username root --password root -table customer -m 1 --target-dir incrimport --incremental append --check-column custid --last-value 6;
 		
@@ -252,7 +252,7 @@ Update only mode:	--update-mode updateonly
 	insert into customer_hdfs select * from customer;
 	
 	vi ~/part-m-00000
-	7~inceptez~tech~Chennai~3~2017-09-28~10000
+	7~internal~tech~Chennai~3~2017-09-28~10000
 	8~iz~tech~Calcutta~5~2015-09-28~10000
 	9~a~srini~chennai~38~2016-08-08~13000
 	
@@ -276,7 +276,7 @@ Allow insert mode:   --update-mode allowinsert
 	
 	vi ~/part-m-00000
 	8~iz~tech~Mumbai~33~2017-09-28~10000
-	10~inceptez~technologies~chennai~33~2017-09-28~13000
+	10~internal~technologies~chennai~33~2017-09-28~13000
 	
 	Note: Delete the last blank line in the above file
 	
